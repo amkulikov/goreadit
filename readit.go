@@ -58,19 +58,23 @@ func NewReader(s io.ReadCloser) *Reader {
 		reader:        s,
 		limReader:     lr,
 		scanner:       bufio.NewScanner(lr),
-		readingCh:     make(chan error),
 		closeCh:       make(chan struct{}),
 		keepReadingCh: make(chan struct{}, 1),
 	}
 }
 
 func (r *Reader) fgRead() {
+	defer close(r.readingCh)
+
 	var buf []byte
 	var err error
 
 	for {
 		select {
-		case <-r.keepReadingCh:
+		case _, ok := <-r.keepReadingCh:
+			if !ok {
+				return
+			}
 		case <-r.closeCh:
 			return
 		}
@@ -95,9 +99,9 @@ func (r *Reader) fgRead() {
 			r.buf.Write(buf)
 		}
 		select {
-		case r.readingCh <- err:
 		case <-r.closeCh:
 			return
+		case r.readingCh <- err:
 		}
 	}
 }
@@ -115,7 +119,10 @@ func (r *Reader) ReadBytes() (data [] byte, err error) {
 	var ok bool
 	r.buf.Reset()
 
-	go r.onceRun.Do(r.fgRead)
+	r.onceRun.Do(func() {
+		r.readingCh = make(chan error)
+		go r.fgRead()
+	})
 
 	if r.timeout > 0 {
 		toTimer := time.NewTimer(r.timeout)
@@ -156,7 +163,7 @@ func (r *Reader) Close() error {
 
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		close(r.readingCh)
+
 		close(r.keepReadingCh)
 	})
 	return r.reader.Close()
