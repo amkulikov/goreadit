@@ -66,7 +66,6 @@ func NewReader(s io.ReadCloser) *Reader {
 func (r *Reader) fgRead() {
 	defer close(r.readingCh)
 
-	var buf []byte
 	var err error
 
 	for {
@@ -95,8 +94,7 @@ func (r *Reader) fgRead() {
 				}
 			}
 		} else {
-			buf, err = ioutil.ReadAll(r.limReader)
-			r.buf.Write(buf)
+			_, err = r.buf.ReadFrom(r.limReader)
 		}
 		select {
 		case <-r.closeCh:
@@ -138,17 +136,16 @@ func (r *Reader) ReadBytes() (data [] byte, err error) {
 
 	select {
 	case <-r.closeCh:
-		err = ErrClosed
+		return nil, ErrClosed
 	case <-timeoutCh:
-		err = ErrTimeout
+		return nil, ErrTimeout
 	case err, ok = <-r.readingCh:
 		if !ok {
 			err = io.EOF
 		}
 	}
 
-	data = make([]byte, r.buf.Len())
-	copy(data, r.buf.Bytes())
+	data, _ = ioutil.ReadAll(&r.buf)
 	return data, err
 }
 
